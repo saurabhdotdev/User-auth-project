@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign up</title>
+<style>
+  html,body{
+    margin:0;padding:0;font-family:Inter, sans-serif;
+    background:linear-gradient(180deg,#0f1f33,#132b45);
+    color:#eef1ff;
+  }
+  .main{
+    max-width:700px;margin:60px auto;padding:30px;
+    background:rgba(255,255,255,0.03);
+    border-radius:16px;
+    border:1px solid rgba(255,255,255,0.05);
+    box-shadow:0 4px 20px rgba(0,0,0,0.4);
+  }
+  h1{margin:0 0 6px 0;font-size:30px;}
+  .small{color:#9fb0c6;margin-bottom:24px;}
+  .tabs{
+    display:flex;gap:12px;margin-bottom:22px;
+  }
+  .tab{
+    padding:10px 26px;border-radius:14px;
+    background:linear-gradient(90deg,#fff,#ebe5ff);
+    color:#0a1320;font-weight:700;
+  }
+  .muted{
+    padding:10px 26px;border-radius:14px;
+    background:transparent;color:#9fb0c6;font-weight:600;
+  }
+  label{display:block;margin-bottom:6px;color:#bcc7da;font-size:14px;}
+  input{
+    width:100%;padding:12px;border-radius:10px;
+    border:1px solid rgba(255,255,255,0.08);
+    background:rgba(255,255,255,0.02);
+    color:#fff;margin-bottom:16px;
+  }
+  button{
+    padding:10px 22px;border:0;border-radius:10px;
+    background:#fff;color:#061225;font-weight:700;
+    cursor:pointer;
+  }
+  pre{
+    margin-top:20px;background:rgba(255,255,255,0.02);
+    padding:12px;border-radius:10px;color:#cfe1ff;
+  }
+</style>
+</head>
+<body>
+  <div class="main">
+    <h1>Welcome</h1>
+    <div class="small">create an account or sign in</div>
+
+    <div class="tabs">
+      <div class="tab">Sign up</div>
+      <a href="/login.html" class="muted">Log in</a>
+    </div>
+
+    <form id="signupForm">
+
+      <label>Name</label>
+      <input name="name" type="text" placeholder="Your name" required>
+
+      <label>Email</label>
+      <input name="email" type="email" placeholder="you@example.com" required>
+
+      <label>Password</label>
+      <input name="password" type="password" placeholder="Minimum 6 characters" required>
+
+      <button type="submit">Create account</button>
+
+      <pre id="signupOut">Responses will appear here</pre>
+    </form>
+  </div>
+
+<script>
+  const base = window.location.origin;
+  const outPre = document.getElementById("signupOut");
+
+  function show(msg, error = false) {
+    outPre.style.color = error ? "#ff6b6b" : "#cfe1ff";
+    outPre.innerText = msg;
+  }
+
+  document.getElementById("signupForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    show("Submitting...");
+
+    const data = Object.fromEntries(new FormData(e.target).entries());
+
+    try {
+      const res = await fetch(base + "/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+
+      const raw = await res.text();
+      let json = {};
+
+      try { json = JSON.parse(raw); } catch (e) {}
+
+      if (!res.ok) {
+        if (res.status === 409) return show("Email already exists ❗", true);
+        if (res.status === 400) return show("Invalid input ❗", true);
+        return show("Server error — try again later ❗", true);
+      }
+
+show("Account created — Redirecting to login...");
+
+setTimeout(() => {
+  window.location.href = "/login.html";
+}, 800);
+
+
+    } catch (err) {
+      show("Network error — check server ❗", true);
+      console.error(err);
+    }
+  });
+</script>
+</body>
+</html>

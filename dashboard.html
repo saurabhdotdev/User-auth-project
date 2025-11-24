@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Dashboard — Data Table</title>
+<style>
+  :root{
+    --bg1:#0f172a; --bg2:#274060; --card:rgba(255,255,255,0.03);
+    --muted:#a8bbcf; --accent:#5b21b6;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;background:linear-gradient(180deg,var(--bg1),var(--bg2));color:#e6eefc;padding:28px;}
+  .wrap{max-width:1100px;margin:0 auto;}
+  .header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+  h1{margin:0;font-size:20px}
+  .btn{background:var(--accent);color:white;padding:8px 12px;border-radius:8px;border:0;cursor:pointer}
+  .card{background:var(--card);padding:18px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4)}
+  .message{color:var(--muted);margin-bottom:12px}
+
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}
+  th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,0.04);text-align:left;vertical-align:top}
+  th{background:rgba(255,255,255,0.02);font-weight:700}
+  pre{background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;color:#dbeafe;overflow:auto}
+  .small{font-size:13px;color:var(--muted)}
+
+  /* Edit modal (simple) */
+ /* Better modal + animation */
+#editModal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(2,6,23,0.6);
+  backdrop-filter: blur(4px);
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  transition: opacity 180ms ease;
+  opacity: 0;
+  pointer-events: none;
+}
+#editModal.show {
+  display: flex;
+  opacity: 1;
+  pointer-events: auto;
+}
+#editModal .card-inner {
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+  padding: 18px;
+  border-radius: 14px;
+  width: 420px;
+  max-width: calc(100% - 40px);
+  box-shadow: 0 12px 40px rgba(2,6,23,0.6);
+  transform: translateY(8px) scale(0.99);
+  transition: transform 180ms ease, opacity 180ms ease;
+  opacity: 0;
+}
+#editModal.show .card-inner {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+#editModal label{display:block;margin-bottom:6px;color:var(--muted);font-size:13px}
+#editModal input{width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);margin-bottom:12px;background:transparent;color:inherit}
+#editModal .actions{display:flex;gap:8px;justify-content:flex-end}
+.btn-ghost{background:#1f2937;color:#fff;padding:9px 14px;border-radius:10px;border:0;cursor:pointer}
+.btn-save{background:#06b6d4;color:#022; padding:9px 14px;border-radius:10px;border:0;cursor:pointer;font-weight:700}
+
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1>Table</h1>
+      <div>
+        <button id="refreshBtn" class="btn">Refresh</button>
+        <button id="logoutBtn" class="btn" style="background:#334155">Logout</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="info" class="message small">Fetching data...</div>
+      <div id="tableWrap" aria-live="polite"></div>
+      <div id="raw" style="margin-top:14px;display:none">
+        <h3 style="margin:8px 0 6px 0;font-size:15px">Raw JSON</h3>
+        <pre id="rawJson"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- EDIT MODAL -->
+  <div id="editModal" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+    <div class="card-inner" role="document">
+      <h3 id="editTitle" style="margin:0 0 8px 0">Edit user</h3>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:10px">Update name and email</div>
+      <label for="editName">Name</label>
+      <input id="editName" type="text" />
+      <label for="editEmail">Email</label>
+      <input id="editEmail" type="email" />
+      <div class="actions" style="margin-top:8px">
+        <button id="editCancel" class="btn-ghost">Cancel</button>
+        <button id="editSave" class="btn-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const apiUrl = window.location.origin + '/api/auth/users';
+const info = document.getElementById('info');
+const tableWrap = document.getElementById('tableWrap');
+const rawDiv = document.getElementById('raw');
+const rawJson = document.getElementById('rawJson');
+document.getElementById('refreshBtn').addEventListener('click', fetchAndRender);
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  localStorage.removeItem('token');
+  window.location.href = '/login.html';
+});
+
+/* flatten helper (unchanged) */
+function flatten(obj, prefix = '', out = {}) {
+  if (obj === null || obj === undefined) {
+    out[prefix.replace(/\.$/, '')] = obj;
+    return out;
+  }
+  if (typeof obj !== 'object' || obj instanceof Date) {
+    out[prefix.replace(/\.$/, '')] = obj;
+    return out;
+  }
+  if (Array.isArray(obj)) {
+    out[prefix.replace(/\.$/, '')] = JSON.stringify(obj);
+    return out;
+  }
+  for (const key of Object.keys(obj)) {
+    flatten(obj[key], prefix + key + '.', out);
+  }
+  return out;
+}
+
+/* Delete button (unchanged) */
+function mkDeleteBtn(id) {
+  const btn = document.createElement('button');
+  btn.innerText = 'Delete';
+  btn.style.padding = '6px 10px';
+  btn.style.borderRadius = '8px';
+  btn.style.border = '0';
+  btn.style.cursor = 'pointer';
+  btn.style.background = '#ff6b6b';
+  btn.style.color = '#fff';
+  btn.addEventListener('click', () => deleteUser(id));
+  return btn;
+}
+
+/* --- EDIT BUTTON + MODAL HANDLERS --- */
+function mkEditBtn(id, name, email) {
+  const btn = document.createElement('button');
+  btn.innerText = 'Edit';
+  btn.style.padding = '6px 10px';
+  btn.style.borderRadius = '8px';
+  btn.style.border = '0';
+  btn.style.cursor = 'pointer';
+  btn.style.background = '#60a5fa';
+  btn.style.color = '#061225';
+  btn.style.marginRight = '8px';
+  btn.addEventListener('click', () => openEditModal(id, name, email));
+  return btn;
+}
+
+const editModal = document.getElementById('editModal');
+const editName = document.getElementById('editName');
+const editEmail = document.getElementById('editEmail');
+const editCancel = document.getElementById('editCancel');
+const editSave = document.getElementById('editSave');
+let editingId = null;
+
+function openEditModal(id, name = '', email = '') {
+  editingId = id;
+  editName.value = name || '';
+  editEmail.value = email || '';
+  editModal.style.display = 'flex';
+  // focus the first input for accessibility
+  setTimeout(() => editName.focus(), 50);
+}
+
+editCancel.addEventListener('click', () => {
+  editModal.style.display = 'none';
+  editingId = null;
+});
+
+editSave.addEventListener('click', async () => {
+  if (!editingId) return;
+  const token = localStorage.getItem('token');
+  if (!token) {
+    info.textContent = 'No token found. Please login first.';
+    editModal.style.display = 'none';
+    return;
+  }
+
+  const payload = { name: editName.value.trim(), email: editEmail.value.trim() };
+  // remove empty fields
+  Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
+  if (Object.keys(payload).length === 0) {
+    info.textContent = 'Nothing to update.';
+    return;
+  }
+
+  try {
+    const res = await fetch(apiUrl + '/' + editingId, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json().catch(()=>null);
+    if (!res.ok) {
+      info.textContent = (json && json.message) ? `Update failed: ${json.message}` : `Update failed: ${res.status}`;
+      editModal.style.display = 'none';
+      return;
+    }
+    info.textContent = (json && json.message) ? json.message : 'Updated. Refreshing...';
+    editModal.style.display = 'none';
+    editingId = null;
+    fetchAndRender();
+  } catch (err) {
+    console.error('Update error', err);
+    info.textContent = 'Network error while updating user.';
+    editModal.style.display = 'none';
+  }
+});
+
+/* JSON -> table rendering: include Edit + Delete in actions column */
+function jsonToTable(json) {
+  tableWrap.innerHTML = '';
+  rawDiv.style.display = 'none';
+  rawJson.textContent = '';
+  if (json === null || json === undefined) {
+    info.textContent = 'No data returned.';
+    return;
+  }
+  let rows = [];
+  if (Array.isArray(json)) {
+    rows = json;
+  } else if (typeof json === 'object') {
+    if (json && json.message === 'protected' && json.user && typeof json.user === 'object') {
+      rows = [json.user];
+    } else {
+      rows = [json];
+    }
+  } else {
+    info.textContent = 'Primitive data returned — showing raw.';
+    rawDiv.style.display = 'block';
+    rawJson.textContent = JSON.stringify(json, null, 2);
+    return;
+  }
+  const flatRows = rows.map(r => flatten(r));
+  const columns = Array.from(flatRows.reduce((acc, r) => {
+    Object.keys(r).forEach(k => acc.add(k));
+    return acc;
+  }, new Set()));
+  if (!columns.includes('actions')) columns.push('actions');
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  columns.forEach(col => {
+    const th = document.createElement('th');
+    th.innerText = col;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  flatRows.forEach(r => {
+    const tr = document.createElement('tr');
+    columns.forEach(col => {
+      const td = document.createElement('td');
+      if (col === 'actions') {
+        const id = r.id ?? r['id'] ?? r['Id'] ?? r['ID'] ?? r['user.id'] ?? r['userId'] ?? r['user.id'];
+        if (id !== undefined && id !== null && id !== '') {
+          // try to get name/email to prefill edit modal
+          const name = r.name ?? r['name'] ?? r['user.name'] ?? '';
+          const email = r.email ?? r['email'] ?? r['user.email'] ?? '';
+          td.appendChild(mkEditBtn(id, name, email));
+          td.appendChild(mkDeleteBtn(id));
+        } else {
+          td.innerText = '';
+        }
+      } else {
+        let val = r.hasOwnProperty(col) ? r[col] : '';
+        if (typeof val === 'object' && val !== null) {
+          try { val = JSON.stringify(val); } catch (e) { val = String(val); }
+        }
+        if (typeof val === 'string' && val.length > 300) {
+          const short = val.slice(0, 300) + '...';
+          td.innerText = short;
+          td.title = val;
+        } else {
+          td.innerText = val === null ? 'null' : (val === undefined ? '' : val);
+        }
+      }
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  tableWrap.appendChild(table);
+  info.textContent = `Showing ${flatRows.length} row(s). Click Refresh to re-fetch.`;
+  rawDiv.style.display = 'block';
+  rawJson.textContent = JSON.stringify(rows, null, 2);
+}
+
+/* fetch + render (unchanged) */
+async function fetchAndRender() {
+  tableWrap.innerHTML = '';
+  info.textContent = 'Fetching data...';
+  rawDiv.style.display = 'none';
+  const token = localStorage.getItem('token');
+  if (!token) {
+    info.textContent = 'No token found. Please login first.';
+    return;
+  }
+  try {
+    const res = await fetch(apiUrl, {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (res.status === 401) {
+      info.textContent = 'Unauthorized (invalid/expired token). Redirecting to login...';
+      setTimeout(() => window.location.href = '/login.html', 1200);
+      return;
+    }
+    const json = await res.json();
+    jsonToTable(json);
+  } catch (err) {
+    console.error('Fetch error', err);
+    info.textContent = 'Network error while fetching data.';
+  }
+}
+
+/* delete (unchanged) */
+async function deleteUser(id) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    info.textContent = 'No token found. Please login first.';
+    return;
+  }
+
+  if (!window.confirm('Delete user with id ' + id + ' ? This action is irreversible.')) {
+    return;
+  }
+  try {
+    const res = await fetch(apiUrl + '/' + id, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+
+    if (res.status === 401) {
+      info.textContent = 'Unauthorized. Redirecting to login...';
+      setTimeout(() => window.location.href = '/login.html', 900);
+      return;
+    }
+    if (res.status === 404) {
+      info.textContent = 'User not found.';
+      return;
+    }
+    if (!res.ok) {
+      const txt = await res.text().catch(()=>null);
+      info.textContent = 'Delete failed: ' + (txt || res.status);
+      return;
+    }
+    const json = await res.json().catch(()=>null);
+    info.textContent = (json && json.message) ? json.message : 'Deleted. Refreshing...';
+    fetchAndRender();
+  } catch (err) {
+    console.error('Delete error', err);
+    info.textContent = 'Network error while deleting user.';
+  }
+}
+
+fetchAndRender();
+</script><script>
+document.addEventListener('DOMContentLoaded', () => {
+  const apiUrl = window.location.origin + '/api/auth/users';
+  const info = document.getElementById('info');
+  const tableWrap = document.getElementById('tableWrap');
+  const rawDiv = document.getElementById('raw');
+  const rawJson = document.getElementById('rawJson');
+
+  // modal elements (guaranteed to exist after DOMContentLoaded)
+  const editModal = document.getElementById('editModal');
+  const editName = document.getElementById('editName');
+  const editEmail = document.getElementById('editEmail');
+  const editCancel = document.getElementById('editCancel');
+  const editSave = document.getElementById('editSave');
+
+  // basic guards
+  if (!editModal || !editName || !editEmail || !editCancel || !editSave) {
+    console.error('Modal elements missing', { editModal, editName, editEmail, editCancel, editSave });
+  }
+
+  document.getElementById('refreshBtn').addEventListener('click', fetchAndRender);
+  document.getElementById('logoutBtn').addEventListener('click', () => {
+    localStorage.removeItem('token');
+    window.location.href = '/login.html';
+  });
+
+  function flatten(obj, prefix = '', out = {}) {
+    if (obj === null || obj === undefined) {
+      out[prefix.replace(/\.$/, '')] = obj;
+      return out;
+    }
+    if (typeof obj !== 'object' || obj instanceof Date) {
+      out[prefix.replace(/\.$/, '')] = obj;
+      return out;
+    }
+    if (Array.isArray(obj)) {
+      out[prefix.replace(/\.$/, '')] = JSON.stringify(obj);
+      return out;
+    }
+    for (const key of Object.keys(obj)) {
+      flatten(obj[key], prefix + key + '.', out);
+    }
+    return out;
+  }
+
+  function mkDeleteBtn(id) {
+    const btn = document.createElement('button');
+    btn.innerText = 'Delete';
+    btn.style.padding = '6px 10px';
+    btn.style.borderRadius = '8px';
+    btn.style.border = '0';
+    btn.style.cursor = 'pointer';
+    btn.style.background = '#ff6b6b';
+    btn.style.color = '#fff';
+    btn.addEventListener('click', () => deleteUser(id));
+    return btn;
+  }
+
+  // ensure openEditModal is defined before mkEditBtn uses it
+  let editingId = null;
+  function openEditModal(id, name = '', email = '') {
+    console.log('openEditModal called for id=', id);
+    editingId = id;
+    editName.value = name || '';
+    editEmail.value = email || '';
+    editModal.classList.add('show');
+    setTimeout(()=>editName.focus(), 50);
+  }
+
+  function mkEditBtn(id, name, email) {
+    const btn = document.createElement('button');
+    btn.innerText = 'Edit';
+    btn.style.padding = '6px 10px';
+    btn.style.borderRadius = '8px';
+    btn.style.border = '0';
+    btn.style.cursor = 'pointer';
+    btn.style.background = '#60a5fa';
+    btn.style.color = '#061225';
+    btn.style.marginRight = '8px';
+    btn.addEventListener('click', () => {
+      console.log('Edit button clicked, id=', id);
+      openEditModal(id, name, email);
+    });
+    return btn;
+  }
+
+  function closeEditModal() {
+    editingId = null;
+    editModal.classList.remove('show');
+  }
+
+  // modal close behaviors
+  editCancel.addEventListener('click', closeEditModal);
+  editModal.addEventListener('click', (ev) => {
+    if (ev.target === editModal) closeEditModal();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && editModal.classList.contains('show')) closeEditModal();
+  });
+
+  async function fetchAndRender() {
+    tableWrap.innerHTML = '';
+    info.textContent = 'Fetching data...';
+    rawDiv.style.display = 'none';
+    const token = localStorage.getItem('token');
+    if (!token) {
+      info.textContent = 'No token found. Please login first.';
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl, {
+        method: 'GET',
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if (res.status === 401) {
+        info.textContent = 'Unauthorized (invalid/expired token). Redirecting to login...';
+        setTimeout(() => window.location.href = '/login.html', 1200);
+        return;
+      }
+      const json = await res.json();
+      jsonToTable(json);
+    } catch (err) {
+      console.error('Fetch error', err);
+      info.textContent = 'Network error while fetching data.';
+    }
+  }
+
+  function jsonToTable(json) {
+    tableWrap.innerHTML = '';
+    rawDiv.style.display = 'none';
+    rawJson.textContent = '';
+    if (json === null || json === undefined) {
+      info.textContent = 'No data returned.';
+      return;
+    }
+    let rows = [];
+    if (Array.isArray(json)) {
+      rows = json;
+    } else if (typeof json === 'object') {
+      if (json && json.message === 'protected' && json.user && typeof json.user === 'object') {
+        rows = [json.user];
+      } else {
+        rows = [json];
+      }
+    } else {
+      info.textContent = 'Primitive data returned — showing raw.';
+      rawDiv.style.display = 'block';
+      rawJson.textContent = JSON.stringify(json, null, 2);
+      return;
+    }
+    const flatRows = rows.map(r => flatten(r));
+    const columns = Array.from(flatRows.reduce((acc, r) => {
+      Object.keys(r).forEach(k => acc.add(k));
+      return acc;
+    }, new Set()));
+    if (!columns.includes('actions')) columns.push('actions');
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    columns.forEach(col => {
+      const th = document.createElement('th');
+      th.innerText = col;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    flatRows.forEach(r => {
+      const tr = document.createElement('tr');
+      columns.forEach(col => {
+        const td = document.createElement('td');
+        if (col === 'actions') {
+          const id = r.id ?? r['id'] ?? r['Id'] ?? r['ID'] ?? r['user.id'] ?? r['userId'] ?? r['user.id'];
+          if (id !== undefined && id !== null && id !== '') {
+            const name = r.name ?? r['name'] ?? r['user.name'] ?? '';
+            const email = r.email ?? r['email'] ?? r['user.email'] ?? '';
+            td.appendChild(mkEditBtn(id, name, email));
+            td.appendChild(mkDeleteBtn(id));
+          } else {
+            td.innerText = '';
+          }
+        } else {
+          let val = r.hasOwnProperty(col) ? r[col] : '';
+          if (typeof val === 'object' && val !== null) {
+            try { val = JSON.stringify(val); } catch (e) { val = String(val); }
+          }
+          if (typeof val === 'string' && val.length > 300) {
+            const short = val.slice(0, 300) + '...';
+            td.innerText = short;
+            td.title = val;
+          } else {
+            td.innerText = val === null ? 'null' : (val === undefined ? '' : val);
+          }
+        }
+        tr.appendChild(td);
+      });
+
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+    info.textContent = `Showing ${flatRows.length} row(s). Click Refresh to re-fetch.`;
+    rawDiv.style.display = 'block';
+    rawJson.textContent = JSON.stringify(rows, null, 2);
+  }
+
+  async function deleteUser(id) {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      info.textContent = 'No token found. Please login first.';
+      return;
+    }
+
+    if (!window.confirm('Delete user with id ' + id + ' ? This action is irreversible.')) {
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl + '/' + id, {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+
+      if (res.status === 401) {
+        info.textContent = 'Unauthorized. Redirecting to login...';
+        setTimeout(() => window.location.href = '/login.html', 900);
+        return;
+      }
+      if (res.status === 404) {
+        info.textContent = 'User not found.';
+        return;
+      }
+      if (!res.ok) {
+        const txt = await res.text().catch(()=>null);
+        info.textContent = 'Delete failed: ' + (txt || res.status);
+        return;
+      }
+      const json = await res.json().catch(()=>null);
+      info.textContent = (json && json.message) ? json.message : 'Deleted. Refreshing...';
+      fetchAndRender();
+    } catch (err) {
+      console.error('Delete error', err);
+      info.textContent = 'Network error while deleting user.';
+    }
+  }
+
+  // ---------- Save action for modal (keeps same behavior as before) ----------
+  editSave.addEventListener('click', async () => {
+    if (!editingId) return;
+    const token = localStorage.getItem('token');
+    if (!token) {
+      info.textContent = 'No token found. Please login first.';
+      closeEditModal();
+      return;
+    }
+
+    const payload = { name: editName.value.trim(), email: editEmail.value.trim() };
+    Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
+    if (Object.keys(payload).length === 0) {
+      info.textContent = 'Nothing to update.';
+      return;
+    }
+
+    editSave.disabled = true;
+    editSave.innerText = 'Saving...';
+
+    try {
+      const res = await fetch(apiUrl + '/' + editingId, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json().catch(()=>null);
+      if (!res.ok) {
+        info.textContent = (json && json.message) ? `Update failed: ${json.message}` : `Update failed: ${res.status}`;
+        closeEditModal();
+        return;
+      }
+      // quick DOM update for changed fields
+      (function updateRowInDom(id, fields) {
+        const rows = tableWrap.querySelectorAll('tbody tr');
+        for (const tr of rows) {
+          const idCell = Array.from(tr.children).find(td => {
+            const text = (td.textContent || '').trim();
+            return text === String(id);
+          });
+          if (idCell) {
+            const ths = Array.from(document.querySelectorAll('table thead th')).map(t => t.innerText);
+            ths.forEach((colName, idx) => {
+              const td = tr.children[idx];
+              if (!td) return;
+              if (colName.toLowerCase() === 'name' && fields.name !== undefined) td.innerText = fields.name;
+              if (colName.toLowerCase() === 'email' && fields.email !== undefined) td.innerText = fields.email;
+            });
+            try {
+              const rawObj = JSON.parse(rawJson.textContent || '[]');
+              if (Array.isArray(rawObj)) {
+                for (let i=0;i<rawObj.length;i++){
+                  if (String(rawObj[i].id) === String(id)) {
+                    if (fields.name !== undefined) rawObj[i].name = fields.name;
+                    if (fields.email !== undefined) rawObj[i].email = fields.email;
+                  }
+                }
+                rawJson.textContent = JSON.stringify(rawObj, null, 2);
+              }
+            } catch(e){/* ignore */ }
+            tr.animate([{ background: 'rgba(96,165,250,0.12)' }, { background: 'transparent' }], { duration: 700 });
+            break;
+          }
+        }
+      })(editingId, payload);
+
+      info.textContent = (json && json.message) ? json.message : 'Updated';
+      closeEditModal();
+    } catch (err) {
+      console.error('Update error', err);
+      info.textContent = 'Network error while updating user.';
+      closeEditModal();
+    } finally {
+      editSave.disabled = false;
+      editSave.innerText = 'Save';
+    }
+  });
+
+  // initial load
+  fetchAndRender();
+});
+</script>
+
+</body>
+</html>
