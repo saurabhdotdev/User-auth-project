@@ -11,14 +11,18 @@ TypeORM entity for User
 ***Project structure***.
 ├─ server.js
 ├─ data-source.js
-├─ controllers/auth.controller.js
-├─ middleware/authMiddleware.js
-├─ routes/auth.js
-├─ entities/User.entity.js
+├─ controllers/
+│ └─ auth.controller.js
+├─ middleware/
+│ └─ authMiddleware.js
+├─ routes/
+│ └─ auth.js
+├─ entities/
+│ └─ User.entity.js
 ├─ static/
-│  ├─ login.html
-│  ├─ signup.html
-│  └─ dashboard.html
+│ ├─ login.html
+│ ├─ signup.html
+│ └─ dashboard.html
 ├─ package.json
 └─ .env.example
 
